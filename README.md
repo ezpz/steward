@@ -14,5 +14,6 @@
 * import R functionality and simple plots
 * break UI code out into functional pieces (window mgmt, error, etc.)
 * Convert UI code to C++ from the C base it is
+* Strip all ntrace logging and make it create events to the server
 * Change ntrace code to use a subdirectory **within** /tmp instead of /tmp
 * ~~Get functional UI code into the repo~~

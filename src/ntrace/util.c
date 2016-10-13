@@ -42,8 +42,6 @@ void save_proc (proc_t * p) {
     for (i = 0; i < FLOWS_MAX; ++i) {
         if (p->flows[i].active) {
             fprintf (out, MARSHAL_FMT, i, p->flows[i].fd, 
-                    p->flows[i].ingress_total,
-                    p->flows[i].egress_total,
                     flow2str (&p->flows[i]));
         }
     }
@@ -78,10 +76,8 @@ proc_t * load_proc (const char * file) {
         return NULL;
     }
 
-    while (fscanf (in, MARSHAL_FMT, &i, &fd, &nr, &nw, type) != EOF) {
+    while (3 == fscanf (in, MARSHAL_FMT, &i, &fd, type)) {
         p->flows[i].fd = fd;
-        p->flows[i].ingress_total = nr;
-        p->flows[i].egress_total = nw;
         if (strncmp (type, "NET", FNAME_SIZE) == 0)
             p->flows[i].type = FD_NET;
         else if (strncmp (type, "PIPE", FNAME_SIZE) == 0)
@@ -98,7 +94,6 @@ proc_t * load_proc (const char * file) {
  * Anything other than SIGINT or a call to _exit calls this function
  */
 void exit_fun () {
-    TRACE (_state, " [atexit] \n");
     /*
      * It is ok if this is called again when _exit is invoked, a flag is 
      * set to ensure that the process is only dumped once
@@ -115,7 +110,6 @@ void exit_fun () {
 void signal_handler (int sig) {
     if (sig != SIGINT)
         return;
-    TRACE (_state, " [SIGINT] \n");
     _exit (0);
 }
 
@@ -170,24 +164,6 @@ const char * flow2str (flow_t * flow) {
 
 
 /**
- * Wipe out the details of a flow
- * @param flow The flow to clean
- */
-void clear_flow (flow_t * flow) {
-    int i = 0;
-    for (; i < SC_INGRESS_SIZE; ++i) {
-        flow->ingress_count[i] = 0;
-        flow->ingress_bytes[i] = 0;
-        flow->ingress_total = 0;
-    }
-    for (i = 0; i < SC_EGRESS_SIZE; ++i) {
-        flow->egress_count[i] = 0;
-        flow->egress_bytes[i] = 0;
-        flow->egress_total = 0;
-    }
-}
-
-/**
  * Stop monitoring the flow of traffic over this fd.
  * @param p The process the fd is associated with
  * @param fd The file descriptor to release
@@ -195,22 +171,7 @@ void clear_flow (flow_t * flow) {
 void release_fd (proc_t * p, int fd) {
     key_t key = hash_key (p, fd);
     flow_t * flow = &(p->flows[key]);
-
-    TRACE (p, " Releasing fd %d\n", fd);
-    TRACE (p, "  Type  : %s\n", flow2str (flow));
-    TRACE (p, "  Active: %s\n", flow->active ? "yes" : "no");
-
-    gettimeofday (&flow->closed, NULL);
-
-    if (flow->active) {
-        double start = (double)flow->opened.tv_sec;
-        double end = (double)flow->closed.tv_sec;
-        start += (double)flow->opened.tv_usec/1000000.0;
-        end += (double)flow->closed.tv_usec/1000000.0;
-        TRACE (p, "  Duration: %0.3fs\n", end - start);
-        flow->active = 0;
-    }
-
+    flow->active = 0;
     save_proc (p);
 }
 
@@ -230,23 +191,8 @@ void associate_fd (proc_t * p, int fd, fd_t type) {
     if (flow->active) {
         if (flow->type == type) {
             return;
-        } else {
-            TRACE (p, " fd %d: \n", fd);
-            switch (type) {
-                case FD_NET:
-                    TRACE (p, "%s -> NET\n", flow2str (flow));
-                    break;
-                case FD_PIPE:
-                    TRACE (p, "%s -> PIPE\n", flow2str (flow));
-                    break;
-                case FD_DISK:
-                    TRACE (p, "%s -> DISK\n", flow2str (flow));
-                    break;
-                default:
-                    TRACE (p, " Broken switch (%d)\n", __LINE__);
-            }
-            flow->type = type;
         }
+        flow->type = type;
         save_proc (p);
         return; 
     }
@@ -258,9 +204,6 @@ void associate_fd (proc_t * p, int fd, fd_t type) {
     flow->active = 1;
     flow->type = type;
 
-    gettimeofday (&flow->opened, NULL);
-
-    TRACE (p, " Created flow: fd => %d, type => %s\n", fd, flow2str (flow));
     save_proc (p);
 }
 
@@ -358,35 +301,13 @@ void do_initialize (proc_t * p) {
 
     ppid = p->pid;
     p->pid = pid;
-    log = getenv ("NTRACE_LOG_FILE");
-    trace = getenv ("NTRACE_TRACE_FILE");
-
-    if (log) {
-        p->log = fopen (log, "a");
-    } else {
-        char logfile[FNAME_SIZE] = {0};
-        snprintf (logfile, FNAME_SIZE, "/tmp/call.%d.log", p->pid);
-        p->log = fopen (logfile, "w");
-    }
-
-    fprintf (p->log, CALL_HEADER);
-    fflush (p->log);
-
-    if (trace) {
-        p->trace = fopen (trace, "a");
-    } else {
-        char tracefile[FNAME_SIZE] = {0};
-        snprintf (tracefile, FNAME_SIZE, "/tmp/trace.%d.log", p->pid);
-        p->trace = fopen (tracefile, "w");
-    }
 
     /*
      * On process creation, std{in,out,err} are assumed to be disk IO.
      * After that, all properties are inherited from the parent
      */
     if (first_time) {
-        TRACE (p, " Process created (%p): pid => %d, ppid => %d\n", 
-                p, p->pid, ppid);
+        /* TODO: Send 'new process' event to server? */
         associate_fd (p, fileno (stdin), FD_DISK);
         associate_fd (p, fileno (stdout), FD_DISK);
         associate_fd (p, fileno (stderr), FD_DISK);
@@ -408,9 +329,6 @@ void do_initialize (proc_t * p) {
         int i = 0;
         flow_t buff[FLOWS_MAX];
 
-        TRACE (p, " Copying details from ppid:%d (getppid:%d)\n", 
-                ppid, getppid ());
-
         for (i = 0; i < FLOWS_MAX; ++i)
             memset (&buff[i], 0, sizeof (flow_t));
 
@@ -422,11 +340,8 @@ void do_initialize (proc_t * p) {
          * active in the child.
          */
         for (i = 0; i < FLOWS_MAX; ++i) {
-            clear_flow (&(p->flows[i]));
             if (p->flows[i].active) {
                 key_t key = hash_key (p, p->flows[i].fd);
-                TRACE (p, "  rehash %d (%s)\n", 
-                        p->flows[i].fd, flow2str (&(p->flows[i])));
                 memcpy (&buff[key], &(p->flows[i]), sizeof (flow_t));
             }
         }
@@ -445,124 +360,12 @@ void do_initialize (proc_t * p) {
     save_proc (p);
 }
 
-
-/**
- * When a process exits, this is the final call to purge data to file
- * before exiting.
- * @param p The process about to be exited
- * @note This is a potentially long operation but it happens as the process
- * exiting so the impact is minimized to operational context.
+/*
+ * This version of ntrace simply sets a flag here
+ * as there is no other local state to manage
  */
 void do_cleanup (proc_t * p) {
-
-    fd_t type = FD_NET;
-
-    if (p->exited)
-        return;
-
-    p->exited = 1;
-
-    TRACE (p, "(Exiting)\n");
-
-    if (p->trace) {
-        fclose (p->trace);
-        p->trace = NULL;
-    }
-    
-    if (! p->log)
-        return;
-    /*
-     * Currently, the individual fd activity is elided as it adds a large
-     * amount of noise to the summary output. 
-     * TODO: enable this behavior with command line option
-     */
-
-    CALL_LOG (p, "#---- Summary ----#\n");
-    CALL_LOG (p, "# call : count (bytes)\n");
-    for (; type < FD_ENUM_SIZE; ++type) {
-        int index = 0;
-        uint64_t ingress = 0, egress = 0;
-        uint64_t in_bytes[SC_INGRESS_SIZE] = {0}; 
-        uint64_t in_count[SC_INGRESS_SIZE] = {0};
-        uint64_t out_bytes[SC_EGRESS_SIZE] = {0}; 
-        uint64_t out_count[SC_EGRESS_SIZE] = {0};
-        key_t key = 0;
-
-        /*
-         * For now, skip everything not net related.
-         * Leave the construct in place in case it becomes
-         * necessary to expose this output or the extra details would
-         * be useful.
-         */
-        if (type != FD_NET)
-            continue;
-
-        for (; key < FLOWS_MAX; ++key) {
-            int i = 0; 
-            for (; i < SC_INGRESS_SIZE; ++i) {
-                if (p->flows[key].type == type) {
-                    in_bytes[i] += p->flows[key].ingress_bytes[i];
-                    in_count[i] += p->flows[key].ingress_count[i];
-                    ingress += p->flows[key].ingress_bytes[i];
-                }
-            }
-            for (i = 0; i < SC_EGRESS_SIZE; ++i) {
-                if (p->flows[key].type == type) {
-                    out_bytes[i] += p->flows[key].egress_bytes[i];
-                    out_count[i] += p->flows[key].egress_count[i];
-                    egress += p->flows[key].egress_bytes[i];
-                }
-            }
-        }
-        CALL_LOG (p, "\n");
-        CALL_LOG (p, "%s byte totals: (in:%" PRIu64 ", out:%" PRIu64 ")\n", 
-                type2str (type), ingress, egress);
-        CALL_LOG (p, "       read : %" PRIu64 " (%" PRIu64 ")\n", 
-                in_count[SC_READ], in_bytes[SC_READ]);
-        CALL_LOG (p, "       recv : %" PRIu64 " (%" PRIu64 ")\n", 
-                in_count[SC_RECV], in_bytes[SC_RECV]);
-        CALL_LOG (p, "   recvfrom : %" PRIu64 " (%" PRIu64 ")\n", 
-                in_count[SC_RECVFROM], in_bytes[SC_RECVFROM]);
-        CALL_LOG (p, "    recvmsg : %" PRIu64 " (%" PRIu64 ")\n", 
-                in_count[SC_RECVMSG], in_bytes[SC_RECVMSG]);
-        /*
-         * FIXME: This is horrible. 
-         * Clean up the enum abuse so that these will index properly here
-         */
-        index = SC_WRITE - SC_WRITE;
-        CALL_LOG (p, "      write : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-        index = SC_SEND - SC_WRITE;
-        CALL_LOG (p, "       send : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-        index = SC_SENDTO - SC_WRITE;
-        CALL_LOG (p, "     sendto : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-        index = SC_SENDMSG - SC_WRITE;
-        CALL_LOG (p, "    sendmsg : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-        index = SC_SENDFILE - SC_WRITE;
-        CALL_LOG (p, "   sendfile : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-        index = SC_SENDFILE64 - SC_WRITE;
-        CALL_LOG (p, " sendfile64 : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-        index = SC_WRITEV - SC_WRITE;
-        CALL_LOG (p, "     writev : %" PRIu64 " (%" PRIu64 ")\n", 
-                out_count[index], out_bytes[index]);
-    }
-
-    fclose (p->log);
-    p->log = NULL;
-
-    /*
-     * FIXME: 
-     * Currently, in /tmp there will remain many .PID.state files
-     * lying around. This *would* be the place to reclaim them individually
-     * except that children rely on parent state at times and removing
-     * a state file here would abandon a child.
-     * Need a good way to fix this issue (on startup, maybe?)
-     */
+    if (NULL != p) { p->exited = 1; }
 };
     
 

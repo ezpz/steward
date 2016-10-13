@@ -19,7 +19,7 @@ int fork () {
      * the parent process before the fork.
      */
     proc_t * p = attach_to_process ();
-    TRACE (p, "fork () = ...\n");
+    /* TODO: send event to server */
     libcall fun = dlsym (RTLD_NEXT, "fork");
     return fun ();
 }
@@ -33,7 +33,7 @@ int clone (int (*fn)(void *), void * stk, int flag, void * arg) {
      * leaving stagnate copies of the state everywhere.
      */
     proc_t * p = attach_to_process ();
-    TRACE (p, "clone (%p, %p, %x, %p) = ...\n", fn, stk, flag, arg);
+    /* TODO: send event to server */
     libcall fun = dlsym (RTLD_NEXT, "clone");
     return fun (fn, stk, flag, arg);
 }

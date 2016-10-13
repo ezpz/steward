@@ -9,19 +9,6 @@
 #include <stdio.h>
 #include <ntrace.h>
 
-#define CALL_LOG(p,f...) do {\
-    fprintf (p->log,f);\
-    fflush (p->log);\
-} while (0);
-
-#define TRACE(p,f...) do {\
-    if (p->trace) { \
-        fprintf (p->trace,"[%6d] ", p->pid); \
-        fprintf (p->trace,f); \
-        fflush (p->trace); \
-    } \
-} while (0);
-
 /* Process control */
 proc_t *    attach_to_process ();
 
@@ -37,7 +24,6 @@ void        save_proc (proc_t *);
 proc_t      *load_proc (const char *);
 void        exit_fun ();
 void        signal_handler (int);
-void        clear_flow (flow_t *);
 key_t       hash_key (proc_t *, int);
 void        associate_fd (proc_t *, int, fd_t);
 void        release_fd (proc_t *, int);
