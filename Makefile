@@ -6,10 +6,11 @@ OFLAGS = -O3 -ansi
 IFLAGS = -I./include
 FLAGS = $(WFLAGS) $(DFLAGS) $(OFLAGS)
 
+STEWARD = steward
 SERVER = server
 CLIENT = client
 
-default: $(SERVER) $(CLIENT)
+default: $(SERVER) $(CLIENT) $(STEWARD)
 
 $(SERVER): src/server.cc
 	$(GPP) $(FLAGS) -o $@ $^ -lpthread -lsqlite3 
@@ -17,6 +18,9 @@ $(SERVER): src/server.cc
 $(CLIENT): src/test_client.c
 	$(GCC) $(FLAGS) -o $@ $^
 
+$(STEWARD): src/steward.cc
+	$(GPP) $(FLAGS) -o $@ $^ -lncurses
+
 clean:
-	rm -f $(SERVER) $(CLIENT)
+	rm -f $(SERVER) $(CLIENT) $(STEWARD)
 	

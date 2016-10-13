@@ -4,7 +4,6 @@
 
 (In no particular order for the time being)
 
-* Get functional UI code into the repo
 * Port FIFO code to use unix domain sockets
 * modify ntrace to use socket API to db server
 * Integrate modified ntrace and UI
@@ -12,4 +11,7 @@
 * Provide error reporting interface
 * break out code to include/ and src/ properly
 * update UI to spawn process and set up all peripherals
-
+* import R functionality and simple plots
+* break UI code out into functional pieces (window mgmt, error, etc.)
+* Convert UI code to C++ from the C base it is
+* ~~Get functional UI code into the repo~~
